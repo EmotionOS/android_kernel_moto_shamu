@@ -228,7 +228,7 @@ static void power_supply_callback(struct power_supply *psy)
 		bcl_config_vph_adc(gbcl, BCL_HIGH_THRESHOLD_TYPE);
 }
 
-/*static void __ref bcl_handle_hotplug(void)
+static void __ref bcl_handle_hotplug(void)
 {
 	int ret = 0, _cpu = 0;
 
@@ -269,13 +269,14 @@ static void power_supply_callback(struct power_supply *psy)
 
 	mutex_unlock(&bcl_hotplug_mutex);
 	return;
-}*/
+}
 static int __ref bcl_cpu_ctrl_callback(struct notifier_block *nfb,
 	unsigned long action, void *hcpu)
 {
 	uint32_t cpu = (uintptr_t)hcpu;
 
-	if (action == CPU_UP_PREPARE || action == CPU_UP_PREPARE_FROZEN) {
+	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_UP_PREPARE:
 		if (!cpumask_test_and_set_cpu(cpu, bcl_cpu_online_mask))
 			pr_debug("BCL online Mask: %u\n",
 				cpumask_weight(bcl_cpu_online_mask));
@@ -286,6 +287,15 @@ static int __ref bcl_cpu_ctrl_callback(struct notifier_block *nfb,
 		} else {
 			pr_debug("voting for CPU%d to be online\n", cpu);
 		}
+		break;
+	case CPU_ONLINE:
+		if (bcl_hotplug_enabled && (bcl_hotplug_request & BIT(cpu))) {
+			pr_debug("CPU%d online. reevaluate hotplug\n", cpu);
+			bcl_handle_hotplug();
+		}
+		break;
+	default:
+		break;
 	}
 
 	return NOTIFY_OK;
@@ -364,7 +374,7 @@ static void battery_monitor_work(struct work_struct *work)
 	if (gbcl->bcl_mode == BCL_DEVICE_ENABLED) {
 		bcl->btm_mode = BCL_VPH_MONITOR_MODE;
 		update_cpu_freq();
-		//bcl_handle_hotplug();
+		bcl_handle_hotplug();
 		bcl_get_battery_voltage(&vbatt);
 		pr_debug("vbat is %d\n", vbatt);
 		if (bcl_vph_state == BCL_LOW_THRESHOLD) {
